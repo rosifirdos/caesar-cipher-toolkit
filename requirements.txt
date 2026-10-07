@@ -1,0 +1,5 @@
+# Dependensi untuk versi desktop (CustomTkinter).
+# CLI (app.py) tetap zero-dependency (Python Standard Library) dan tidak memerlukan file ini.
+#
+# Pasang:  pip install -r requirements.txt
+customtkinter>=5.2.0
