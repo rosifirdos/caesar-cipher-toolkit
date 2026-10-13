@@ -32,7 +32,9 @@ D:\portofolio\caesar-cipher-toolkit\
 ├── cryptanalysis.py        # Offensive Module (Brute Force 25 shifts & Chi-Squared Auto Crack)
 ├── transposition.py        # Core Cryptography Engine - Keluarga Transposisi (5 Algoritma)
 ├── app.py                  # User Interface (CLI Interaktif & Terminal Flags Parser)
-├── desktop_app.py          # Versi Desktop GUI (CustomTkinter) - 7 tab mirror CLI + fitur UX
+├── desktop_app.py          # Versi Desktop GUI (CustomTkinter) - tema Kali Linux + Mode CLI
+├── cli_mode.py             # Jembatan Mode CLI desktop: fast-path operasi favorit + terminal CLI asli
+├── kali_theme.json         # Tema UI Kali Linux (CustomTkinter theme file)
 ├── requirements.txt        # Dependensi versi desktop (customtkinter)
 ├── test_caesar.py          # Unit Test Suite (Substitusi Caesar & Kriptanalisis)
 ├── test_transposition.py   # Unit Test Suite (Keluarga Transposisi - 29 tes, vektor terverifikasi)
@@ -166,12 +168,13 @@ Jalankan `python app.py`, pilih **7. Kriptografi Transposisi**, lalu pilih algor
 
 ## 🖥️ Mode Desktop (GUI)
 
-Selain CLI, tersedia versi **aplikasi desktop** berbasis CustomTkinter. Versi desktop mempertahankan **seluruh** fitur CLI dalam bentuk 7 tab, plus fitur UX tambahan:
+Selain CLI, tersedia versi **aplikasi desktop** berbasis CustomTkinter dengan **tema UI Kali Linux** (near-black navy, aksen Kali blue, teks terminal hijau — tema didefinisikan di `kali_theme.json`). Versi desktop mempertahankan **seluruh** fitur CLI dalam bentuk 7 tab, plus fitur UX tambahan:
 
 - **Live preview** real-time saat mengetik / menggeser kunci
 - **Slider kunci visual 0–25** sinkron dua-arah dengan input numerik
 - **Indikator kekuatan kunci** berwarna (IDENTITAS / ROT13 / Lemah) — menegaskan pesan *cyber security advisory*
 - **Live preview transposisi** — hasil berubah real-time saat mengganti algoritma, keyword, rute, atau mode
+- **Mode CLI (SHELL)** — tombol `CLI` pada header membuka *Mode CLI*: pilih operasi favorit (Enkripsi/Dekripsi/Brute Force/Auto-Crack) yang dijalankan langsung pada engine yang sama, atau angkat **terminal CLI asli** (`app.py`) sebagai subprocess untuk penggunaan penuh (interaktif & `--flag`)
 - **Salin ke clipboard** untuk setiap hasil
 - **Riwayat operasi sesi** di panel bawah
 
