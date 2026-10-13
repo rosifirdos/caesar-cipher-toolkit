@@ -21,10 +21,6 @@ from caesar_cipher import CaesarCipher
 from cryptanalysis import CaesarBreaker
 from app import ADVISORY_TEXT, _transpose_text, TRANSPOSITION_CLASSES
 from transposition import RouteCipher
-from cli_mode import COLOR_NAME_TO_HEX, CLI_LABEL_HINT
-
-# `Path` dipakai pada jembatan Mode CLI (subprocess), hindari import berulang.
-from pathlib import Path
 
 
 # ---------------------------------------------------------------------------
@@ -32,19 +28,19 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 ctk.set_appearance_mode("dark")
 
-# Tema UI "Kali Linux": gunakan tema kustom tersendiri (near-black navy, aksen
-# Kali blue, teks terminal hijau). Upper-half-panel & tab langsung mengambil
+# Tema tampilan desktop bertema dark terminal: near-black navy background,
+# aksen biru, teks terminal hijau. Upper-half-panel & tab langsung mengambil
 # follow-theme dari top_fg_color / CTkSegmentedButton -- keduanya di atur di
 # dalam theme file, bukan inline, agar seluruh widget konsisten satu sumber.
 ctk.set_default_color_theme("kali_theme.json")
 
-# Palet sinyal keamanan (warna teks status) - disesuaikan dengan palet Kali
+# Palet sinyal keamanan (warna teks status) - bertema terminal dark
 COLOR_DANGER = "#FF6B6B"     # merah - identitas / kritis
 COLOR_WARN = "#FF9F40"       # oranye - ROT13
 COLOR_WEAK = "#FFD24D"       # kuning - lemah
-COLOR_OK = "#00CC66"         # hijau terminal Kali - info sukses
+COLOR_OK = "#00CC66"         # hijau terminal - info sukses
 COLOR_MUTED = "#9AA6B8"      # abu-abu - netral
-COLOR_BLUE = "#367BF0"       # Kali blue - aksen brand
+COLOR_BLUE = "#367BF0"       # aksen biru
 COLOR_GREEN_BRIGHT = "#00E676"  # hijau terang - teks sukses / prompt $
 
 FONT_MONO = ("Consolas", 14)
@@ -53,13 +49,11 @@ FONT_TITLE = ("Segoe UI", 22, "bold")
 FONT_BODY = ("Segoe UI", 12)
 FONT_BODY_BOLD = ("Segoe UI", 12, "bold")
 
-# Header teks bernuansa Kali (kiri ke kanan; di-render berurutan)
-HEADER_TITLE = "KALI LINUX  ·  CYBERSEC & CRYPTANALYSIS TOOLKIT"
-HEADER_SUB = "[*] Paket: caesar-cipher-toolkit    [*] Mode: DESKTOP    [*] Tip: lihat SHELL untuk mode CLI"
-HEADER_EDGE_L = "[KALI ~ $]"
+# Header teks bertema terminal (kiri ke kanan; di-render berurutan)
+HEADER_TITLE = "CYBERSEC & CRYPTANALYSIS TOOLKIT"
+HEADER_SUB = "[*] Paket: caesar-cipher-toolkit    [*] Mode: DESKTOP    [*] Cyber Security & Cryptanalysis"
+HEADER_EDGE_L = "[SECLAB ~ $]"
 HEADER_EDGE_R = "[e]nter · [e]ncrypt · [d]ecrypt · [b]rute · [f]req · [c]lipboard"
-HEADER_SHELL = "SHELL"
-HEADER_CLI = "CLI"
 
 
 def key_strength(norm_k: int):
@@ -151,7 +145,7 @@ class CaesarCipherApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Kali Linux Edition - Cyber Security & Cryptanalysis Toolkit")
+        self.title("Cyber Security & Cryptanalysis Toolkit (Desktop)")
         self.geometry("1180x800")
         self.minsize(1020, 720)
 
@@ -173,7 +167,7 @@ class CaesarCipherApp(ctk.CTk):
         header.grid(row=0, column=0, padx=20, pady=(18, 6), sticky="ew")
         header.grid_columnconfigure(0, weight=1)
 
-        # Baris status ala terminal Kali (edge kiri/kanan + aksen.)
+        # Baris status ala terminal (edge kiri/kanan + aksen.)
         status = ctk.CTkFrame(header, fg_color="transparent")
         status.grid(row=0, column=0, columnspan=3, sticky="ew")
         status.grid_columnconfigure(1, weight=1)
@@ -188,13 +182,6 @@ class CaesarCipherApp(ctk.CTk):
             font=FONT_TITLE, text_color=COLOR_OK,
         )
         title.grid(row=1, column=0, padx=(0, 10), sticky="w")
-        ctk.CTkLabel(header, text=HEADER_SHELL, font=FONT_MONO, text_color=COLOR_BLUE).grid(
-            row=1, column=1, sticky="w", padx=(0, 6))
-        ctk.CTkButton(
-            header, text=HEADER_CLI, width=120, height=30, corner_radius=6,
-            font=FONT_BODY_BOLD, fg_color=COLOR_BLUE, hover_color="#2B66D4",
-            command=self._open_cli_mode,
-        ).grid(row=1, column=2, sticky="e")
 
         sub = ctk.CTkLabel(
             header,
@@ -780,133 +767,6 @@ class CaesarCipherApp(ctk.CTk):
         algo, mode, params, raw = getattr(self, "_last_trans", ("columnar", "encrypt", {}, ""))
         preview = raw[:40] + ("..." if len(raw) > 40 else "")
         self._log("TRANSPOSISI", f"{algo} ({mode}) {params} \"{preview}\"")
-
-    # ----------------------- Mode CLI (SHELL) -----------------------
-    def _open_cli_mode(self):
-        """
-        Buka jendela "Mode CLI" -- jembatan ke CLI aplikasi (`app.py`).
-
-        Memberi pengguna menu pilihan untuk memilih MODE CLI: operasi favorit
-        dijalankan langsung (fast-path, tanpa subprocess), atau mengangkat
-        terminal CLI asli untuk penggunaan penuh.
-        """
-        win = ctk.CTkToplevel(self)
-        win.title("Mode CLI - Cyber Security & Cryptanalysis Toolkit")
-        win.geometry("560x420")
-        win.minsize(500, 360)
-        win.after(140, lambda: win.lift())
-
-        ctk.CTkLabel(
-            win,
-            text="[kali@upgris ~ $] python app.py --help",
-            font=FONT_MONO,
-        ).pack(pady=(14, 2))
-
-        ctk.CTkLabel(
-            win,
-            text="Pilih MODE CLI untuk dijalankan pada terminal aplikasi CLI:",
-            font=FONT_BODY_BOLD,
-        ).pack(pady=(2, 10))
-
-        def run_fast(path, color):
-            box = self._new_cli_box(win)
-            data = self._cli_fast(path, color)
-            self._render_box(box, data)
-
-        btn_frame = ctk.CTkFrame(win, fg_color="transparent")
-        btn_frame.pack(fill="x", padx=14)
-
-        # Fast-path (tanpa subprocess): hasil langsung dirender di kotak bawah.
-        for label, btn_color in (("Enkripsi (PESAN...)", COLOR_BLUE),
-                                 ("Dekripsi (SHVDQ...)", "#2B66D4"),
-                                 ("Brute Force", "#4263EB"),
-                                 ("Auto-Crack", "#4338CA")):
-            ctk.CTkButton(
-                btn_frame, text=label, fg_color=btn_color,
-                command=lambda l=label: run_fast(l, "blue"),
-            ).pack(side="left", padx=4)
-
-        def run_shell():
-            """Angkat terminal CLI asli (subprocess) -- penggunaan penuh."""
-            self._cli_mode_path = Path(__file__).resolve().parent
-            import subprocess, sys
-            subprocess.Popen(
-                [sys.executable, "-m", "cli_mode", "shell"],
-                cwd=str(self._cli_mode_path),
-            )
-
-        ctk.CTkButton(
-            btn_frame, text="Terminal CLI (penuh) -- subprocess", width=260,
-            fg_color="#2B66D4", command=run_shell,
-        ).pack(side="left", padx=4)
-
-        ctk.CTkLabel(
-            win, text=CLI_LABEL_HINT, font=FONT_MONO_SMALL, text_color=COLOR_MUTED,
-        ).pack(pady=(12, 2))
-
-    def _cli_fast(self, label, color):
-        """
-        Jalankan satu operasi favorit secara langsung (ekuivalen-CLI ringan)
-        dan kembalikan teks beranotasi-warna untuk dirender di kotak output.
-        Tidak menelurkan proses baru sama sekali.
-        """
-        if label == "Enkripsi (PESAN...)":
-            result = _transpose_text(
-                "double", "encrypt", {"key1": "KRIPTO", "key2": "SIBER"},
-                "PESAN SANGAT RAHASIA DARI UPGRIS", clean=False,
-            )
-            lines = self._compose_cli_result("double", "encrypt", result, color)
-            return lines
-
-        if label == "Dekripsi (SHVDQ...)":
-            result = CaesarCipher.decrypt("SHVDQ VDQJDW UDKDVLD", 3)
-            lines = self._compose_cli_result("caesar", "decrypt", result, color)
-            return lines
-
-        if label == "Brute Force":
-            lines = ["[+] Exhaustive key search .. k = 1 s.d 25:"]
-            for res in CaesarBreaker.brute_force("LQIRUPDWLND XSJULV")[:5]:
-                lines.append(f"  Shift {res['key']:2d}: {res['plaintext']}")
-            lines.append(f"  [{len(CaesarBreaker.brute_force('LQIRUPDWLND XSJULV'))} kandidat]")
-            return {"color": "blue", "text": "\n".join(lines)}
-
-        # Auto-Crack
-        crack = CaesarBreaker.frequency_analysis_crack(
-            "SHVDQ VDQJDW UDKDVLD GHUPD LQIRUPDWLND VLEHU GDQ NULSWRJUDIL",
-            lang="id")
-        lines = [
-            "[+] HASIL ANALISIS FREKUENSI (Chi-Squared):",
-            f"  Kunci terbaik : {crack['best_key']}",
-            f"  Chi^2         : {crack['best_score']}",
-            f"  Plaintext     : {crack['cracked_plaintext']}",
-        ]
-        return {"color": "blue", "text": "\n".join(lines)}
-
-    @staticmethod
-    def _compose_cli_result(algo, mode, result, color="green"):
-        return {
-            "color": color,
-            "text": f"[{algo} {mode}] {result}",
-        }
-
-    def _new_cli_box(self, parent):
-        """Buat kotak output CLI (berwarna, readonly) yang mengikuti tema Kali."""
-        frame = ctk.CTkFrame(parent)
-        frame.pack(fill="both", expand=True, padx=14, pady=(10, 6))
-        box = ctk.CTkTextbox(frame, font=FONT_MONO, wrap="word", state="disabled")
-        box.pack(fill="both", expand=True, padx=6, pady=6)
-        return box
-
-    @staticmethod
-    def _render_box(box, data):
-        """Tulis (mungkin beranotasi-warna) output CLI ke dalam kotak."""
-        box.configure(state="normal")
-        box.delete("0.0", "end")
-        color = data.get("color", "green")
-        hex_color = COLOR_NAME_TO_HEX.get(color, COLOR_GREEN_BRIGHT)
-        box.insert("0.0", data.get("text", ""))
-        box.configure(state="disabled")
-        box.configure(fg_color="#0A0D13", text_color=hex_color)
 
     # ----------------------- Tab 7: Advisory -----------------------
     def _build_advisory_tab(self, parent):
