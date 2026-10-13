@@ -19,7 +19,8 @@ import customtkinter as ctk
 
 from caesar_cipher import CaesarCipher
 from cryptanalysis import CaesarBreaker
-from app import ADVISORY_TEXT
+from app import ADVISORY_TEXT, _transpose_text, TRANSPOSITION_CLASSES
+from transposition import RouteCipher
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +54,74 @@ def key_strength(norm_k: int):
     if norm_k == 13:
         return ("ROT13 - kunci paling lemah (huruf dipetakan bolak-balik)", COLOR_WARN)
     return ("Lemah - keyspace Caesar hanya 25, dapat dibobol <0.0001 dtk via brute-force", COLOR_WEAK)
+
+
+# ---------------------------------------------------------------------------
+# Field parameter transposisi (dipakai bersama: tab "Transposisi" & "Operasi File")
+# ---------------------------------------------------------------------------
+
+def _rebuild_key_fields(container, store):
+    """
+    Bangun ulang field parameter algoritma transposisi di dalam `container`.
+    `store` harus memuat:
+      algo_var       -> ctk.StringVar berisi nama algoritma
+      on_change      -> callback (dipanggil tiap entri/kontrol berubah & setelah rebuild)
+      widgets        -> dict; diisi pasangan nama -> widget (entry / OptionMenu route).
+    Setiap CTkEntry memakai StringVar yang dibaca lewat key "<nama>_var",
+    sehingga tidak ada getter widget yang rusak saat rebuild.
+    """
+    for child in container.winfo_children():
+        child.destroy()
+    widgets = {}
+    algo = store["algo_var"].get()
+    on_change = store["on_change"]
+
+    def add(label_text, name, width=120, default=""):
+        ctk.CTkLabel(container, text=label_text, font=FONT_BODY).pack(side="left", padx=(0, 6))
+        var = ctk.StringVar(value=default)
+        entry = ctk.CTkEntry(container, width=width, font=FONT_MONO, textvariable=var)
+        entry.bind("<KeyRelease>", lambda _e: on_change())
+        entry.pack(side="left", padx=(0, 12))
+        widgets[name] = entry
+        widgets[name + "_var"] = var
+
+    if algo == "railfence":
+        add("Jumlah Rel (Rails):", "rails", default="3")
+    elif algo == "route":
+        add("Lebar Grid:", "width", default="5")
+        ctk.CTkLabel(container, text="Rute:", font=FONT_BODY).pack(side="left", padx=(0, 6))
+        route_menu = ctk.CTkOptionMenu(container, values=list(RouteCipher.ROUTE_CHOICES),
+                                       width=150, command=lambda _r: on_change())
+        route_menu.set("spiral_tl")
+        route_menu.pack(side="left", padx=(0, 12))
+        widgets["route_menu"] = route_menu
+    elif algo in ("columnar", "myszkowski"):
+        default = "ZEBRA" if algo == "columnar" else "TOMATO"
+        add("Keyword:", "keyword", default=default)
+    else:  # double
+        add("Keyword 1:", "key1", default="ZEBRA")
+        add("Keyword 2:", "key2", default="KRIPTO")
+
+    store["widgets"] = widgets
+    on_change()
+
+
+def _collect_trans_params(store):
+    """Kumpulkan parameter (dict kwargs cipher) dari store field transposisi."""
+    algo = store["algo_var"].get()
+    w = store["widgets"]
+
+    def _int(var, default):
+        raw = var.get().strip()
+        return int(raw) if raw else default
+
+    if algo == "railfence":
+        return {"rails": _int(w["rails_var"], 3)}
+    if algo == "route":
+        return {"width": _int(w["width_var"], 5), "route": w["route_menu"].get()}
+    if algo in ("columnar", "myszkowski"):
+        return {"keyword": w["keyword_var"].get()}
+    return {"key1": w["key1_var"].get(), "key2": w["key2_var"].get()}
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +177,7 @@ class CaesarCipherApp(ctk.CTk):
         self.tabs.add("Operasi File")
         self.tabs.add("Brute Force")
         self.tabs.add("Frequency Analysis")
+        self.tabs.add("Transposisi")
         self.tabs.add("Advisory")
 
         self._build_encrypt_tab(self.tabs.tab("Enkripsi"))
@@ -115,6 +185,7 @@ class CaesarCipherApp(ctk.CTk):
         self._build_file_tab(self.tabs.tab("Operasi File"))
         self._build_bruteforce_tab(self.tabs.tab("Brute Force"))
         self._build_freq_tab(self.tabs.tab("Frequency Analysis"))
+        self._build_transposition_tab(self.tabs.tab("Transposisi"))
         self._build_advisory_tab(self.tabs.tab("Advisory"))
 
     def _build_history_panel(self):
@@ -336,60 +407,135 @@ class CaesarCipherApp(ctk.CTk):
                 entry.delete(0, "end")
                 entry.insert(0, path)
 
+        # Row 0: mode operasi
         self.file_mode = ctk.StringVar(value="encrypt")
         modes = ctk.CTkFrame(parent, fg_color="transparent")
-        modes.grid(row=0, column=0, columnspan=3, sticky="w", padx=4, pady=(4, 8))
+        modes.grid(row=0, column=0, columnspan=3, sticky="w", padx=4, pady=(4, 4))
         ctk.CTkLabel(modes, text="Mode Operasi:", font=FONT_BODY_BOLD).pack(side="left", padx=(0, 12))
         ctk.CTkRadioButton(modes, text="Enkripsi File", variable=self.file_mode,
                            value="encrypt", font=FONT_BODY).pack(side="left", padx=8)
         ctk.CTkRadioButton(modes, text="Dekripsi File", variable=self.file_mode,
                            value="decrypt", font=FONT_BODY).pack(side="left", padx=8)
 
-        ctk.CTkLabel(parent, text="File Input:", font=FONT_BODY).grid(row=1, column=0, sticky="w", padx=4, pady=6)
+        # Row 1: pilihan sistem cipher
+        ctk.CTkLabel(parent, text="Sistem Cipher:", font=FONT_BODY_BOLD).grid(
+            row=1, column=0, sticky="w", padx=4, pady=(4, 0))
+        self.file_sys = ctk.StringVar(value="caesar")
+        sysrow = ctk.CTkFrame(parent, fg_color="transparent")
+        sysrow.grid(row=1, column=0, columnspan=3, sticky="w", padx=4, pady=4)
+        ctk.CTkRadioButton(sysrow, text="Caesar Shift", variable=self.file_sys, value="caesar",
+                           font=FONT_BODY, command=self._on_file_sys_change).pack(side="left", padx=8)
+        ctk.CTkRadioButton(sysrow, text="Transposisi", variable=self.file_sys, value="transposisi",
+                           font=FONT_BODY, command=self._on_file_sys_change).pack(side="left", padx=8)
+
+        # Row 2-3: path input/output
+        ctk.CTkLabel(parent, text="File Input:", font=FONT_BODY).grid(row=2, column=0, sticky="w", padx=4, pady=6)
         self.file_in = ctk.CTkEntry(parent, width=520, font=FONT_MONO_SMALL)
-        self.file_in.grid(row=1, column=1, sticky="ew", padx=4, pady=6)
+        self.file_in.grid(row=2, column=1, sticky="ew", padx=4, pady=6)
         ctk.CTkButton(parent, text="Browse...", width=90,
-                      command=lambda: browse(self.file_in)).grid(row=1, column=2, padx=4, pady=6)
+                      command=lambda: browse(self.file_in)).grid(row=2, column=2, padx=4, pady=6)
 
-        ctk.CTkLabel(parent, text="File Output:", font=FONT_BODY).grid(row=2, column=0, sticky="w", padx=4, pady=6)
+        ctk.CTkLabel(parent, text="File Output:", font=FONT_BODY).grid(row=3, column=0, sticky="w", padx=4, pady=6)
         self.file_out = ctk.CTkEntry(parent, width=520, font=FONT_MONO_SMALL)
-        self.file_out.grid(row=2, column=1, sticky="ew", padx=4, pady=6)
+        self.file_out.grid(row=3, column=1, sticky="ew", padx=4, pady=6)
         ctk.CTkButton(parent, text="Browse...", width=90,
-                      command=lambda: browse_save(self.file_out)).grid(row=2, column=2, padx=4, pady=6)
+                      command=lambda: browse_save(self.file_out)).grid(row=3, column=2, padx=4, pady=6)
 
-        ctk.CTkLabel(parent, text="Kunci (k):", font=FONT_BODY).grid(row=3, column=0, sticky="w", padx=4, pady=6)
-        self.file_key = ctk.CTkEntry(parent, width=120, font=FONT_MONO)
+        # Row 4: kontrol spesifik sistem (Caesar key ATAU parameter transposisi)
+        self.file_ctrl = ctk.CTkFrame(parent, fg_color="transparent")
+        self.file_ctrl.grid(row=4, column=0, columnspan=3, sticky="w", padx=4, pady=6)
+        self.file_ctrl.grid_columnconfigure(1, weight=1)
+
+        # Sub-frame Caesar: label + entry kunci
+        self.file_caesar_ctrl = ctk.CTkFrame(self.file_ctrl, fg_color="transparent")
+        ctk.CTkLabel(self.file_caesar_ctrl, text="Kunci (k):", font=FONT_BODY).pack(side="left", padx=(0, 8))
+        self.file_key = ctk.CTkEntry(self.file_caesar_ctrl, width=120, font=FONT_MONO)
         self.file_key.insert(0, "3")
-        self.file_key.grid(row=3, column=1, sticky="w", padx=4, pady=6)
+        self.file_key.pack(side="left")
 
+        # Sub-frame Transposisi: algoritma + parameter + opsi clean
+        self.file_trans_ctrl = ctk.CTkFrame(self.file_ctrl, fg_color="transparent")
+        ctk.CTkLabel(self.file_trans_ctrl, text="Algoritma:", font=FONT_BODY).pack(side="left", padx=(0, 8))
+        self.ft_algo_var = ctk.StringVar(value="columnar")
+        self.ft_algo_menu = ctk.CTkOptionMenu(
+            self.file_trans_ctrl,
+            values=["columnar", "myszkowski", "railfence", "route", "double"],
+            width=190, command=lambda _a: self._on_ft_algo_change(),
+        )
+        self.ft_algo_menu.set("columnar")
+        self.ft_algo_menu.pack(side="left", padx=(0, 12))
+        self.ft_key_container = ctk.CTkFrame(self.file_trans_ctrl, fg_color="transparent")
+        self.ft_key_container.pack(side="left")
+        self.ft_clean = ctk.CTkCheckBox(self.file_trans_ctrl, text="Mode klasik (clean)", font=FONT_BODY)
+        self.ft_clean.pack(side="left", padx=(14, 0))
+
+        # Persisten config transposisi operasi file
+        self.ft_store = {"algo_var": self.ft_algo_var, "on_change": self._on_ft_key_change, "widgets": {}}
+        _rebuild_key_fields(self.ft_key_container, self.ft_store)
+        self._on_file_sys_change()  # tampilkan frame sesuai sistem default (caesar)
+
+        # Row 5-6: tombol jalankan + status
         ctk.CTkButton(parent, text="Jalankan Operasi File", height=36,
-                      command=self._run_file_op).grid(row=4, column=0, columnspan=3,
+                      command=self._run_file_op).grid(row=5, column=0, columnspan=3,
                                                       sticky="ew", padx=4, pady=(10, 6))
         self.file_status = ctk.CTkLabel(parent, text="Siap.", font=FONT_MONO_SMALL,
                                         text_color=COLOR_MUTED, anchor="w")
-        self.file_status.grid(row=5, column=0, columnspan=3, sticky="ew", padx=4, pady=(2, 4))
+        self.file_status.grid(row=6, column=0, columnspan=3, sticky="ew", padx=4, pady=(2, 4))
+
+    def _on_file_sys_change(self, *_args):
+        """Tampilkan/sembunyikan kontrol sesuai sistem cipher terpilih (Caesar | Transposisi)."""
+        is_trans = self.file_sys.get() == "transposisi"
+        if is_trans:
+            self.file_caesar_ctrl.pack_forget()
+            self.file_trans_ctrl.pack(side="left", fill="x", expand=True)
+        else:
+            self.file_trans_ctrl.pack_forget()
+            self.file_caesar_ctrl.pack(side="left", fill="x", expand=True)
+
+    def _on_ft_algo_change(self, *_args):
+        _rebuild_key_fields(self.ft_key_container, self.ft_store)
+
+    def _on_ft_key_change(self, *_args):
+        """No-op; penyimpanan otomatis saat entri berubah tidak diperlukan di sini."""
+
+    def _collect_file_trans_params(self):
+        """Baca parameter transposisi dari kontrol tab Operasi File (store dict)."""
+        return _collect_trans_params(self.ft_store)
 
     def _run_file_op(self):
         in_path = self.file_in.get().strip()
         out_path = self.file_out.get().strip()
-        key_str = self.file_key.get().strip()
         if not in_path or not out_path:
             self.file_status.configure(text="[!] Path input dan output wajib diisi.", text_color=COLOR_DANGER)
             return
+
+        mode = self.file_mode.get()
         try:
-            k = int(key_str) if key_str else 3
-        except ValueError:
-            self.file_status.configure(text="[!] Kunci harus bilangan bulat.", text_color=COLOR_DANGER)
-            return
-        try:
-            if self.file_mode.get() == "encrypt":
-                CaesarCipher.encrypt_file(in_path, out_path, k)
-                msg = f"Berhasil mengenkripsi file -> {out_path}"
-                self._log("FILE-ENC", f"k={k} {in_path} -> {out_path}")
+            if self.file_sys.get() == "transposisi":
+                algo = self.ft_algo_var.get()
+                params = self._collect_file_trans_params()
+                clean = bool(self.ft_clean.get())
+                trans_cls = TRANSPOSITION_CLASSES[algo]
+                method = trans_cls.encrypt_file if mode == "encrypt" else trans_cls.decrypt_file
+                method(in_path, out_path, **params, clean=clean)
+                sys_label = f"TRANS-{algo.upper()}"
+                msg = f"Berhasil {mode} file -> {out_path}"
+                self._log(sys_label, f"{in_path} -> {out_path} ({params})")
             else:
-                CaesarCipher.decrypt_file(in_path, out_path, k)
-                msg = f"Berhasil mendekripsi file -> {out_path}"
-                self._log("FILE-DEC", f"k={k} {in_path} -> {out_path}")
+                key_str = self.file_key.get().strip()
+                try:
+                    k = int(key_str) if key_str else 3
+                except ValueError:
+                    self.file_status.configure(text="[!] Kunci harus bilangan bulat.", text_color=COLOR_DANGER)
+                    return
+                if mode == "encrypt":
+                    CaesarCipher.encrypt_file(in_path, out_path, k)
+                    msg = f"Berhasil mengenkripsi file -> {out_path}"
+                    self._log("FILE-ENC", f"k={k} {in_path} -> {out_path}")
+                else:
+                    CaesarCipher.decrypt_file(in_path, out_path, k)
+                    msg = f"Berhasil mendekripsi file -> {out_path}"
+                    self._log("FILE-DEC", f"k={k} {in_path} -> {out_path}")
             self.file_status.configure(text=f"[+] {msg}", text_color=COLOR_OK)
         except Exception as exc:
             self.file_status.configure(text=f"[-] Error operasi file: {exc}", text_color=COLOR_DANGER)
@@ -484,7 +630,123 @@ class CaesarCipherApp(ctk.CTk):
         self._fa_plain = res["cracked_plaintext"]
         self._log("FREQ-CRACK", f'lang={lang} best_key={res["best_key"]} chi2={res["best_score"]}')
 
-    # ----------------------- Tab 6: Advisory -----------------------
+    # ----------------------- Tab 6: Transposisi -----------------------
+    def _build_transposition_tab(self, parent):
+        parent.grid_columnconfigure(0, weight=1)
+        parent.grid_rowconfigure(4, weight=1)
+
+        # Row 0: pemilih algoritma
+        band = ctk.CTkFrame(parent, fg_color="transparent")
+        band.grid(row=0, column=0, sticky="ew", padx=4, pady=(4, 0))
+        ctk.CTkLabel(band, text="Algoritma:", font=FONT_BODY_BOLD).pack(side="left", padx=(0, 8))
+        self.trans_algo_var = ctk.StringVar(value="columnar")
+        self.trans_algo_menu = ctk.CTkOptionMenu(
+            band,
+            values=["columnar", "myszkowski", "railfence", "route", "double"],
+            width=190, command=lambda _a: self._trans_algo_changed(),
+        )
+        self.trans_algo_menu.set("columnar")
+        self.trans_algo_menu.pack(side="left", padx=(0, 16))
+
+        # Row 0b: mode enkripsi/dekripsi
+        self.trans_mode_var = ctk.StringVar(value="encrypt")
+        ctk.CTkRadioButton(band, text="Enkripsi", variable=self.trans_mode_var,
+                           value="encrypt", font=FONT_BODY, command=self._sync_transposition).pack(side="left", padx=(0, 8))
+        ctk.CTkRadioButton(band, text="Dekripsi", variable=self.trans_mode_var,
+                           value="decrypt", font=FONT_BODY, command=self._sync_transposition).pack(side="left", padx=(0, 8))
+
+        # Row 0c: opsi klasik
+        self.trans_clean = ctk.CTkCheckBox(band, text="Mode klasik (clean)", font=FONT_BODY,
+                                           command=self._sync_transposition)
+        self.trans_clean.pack(side="left", padx=(16, 0))
+        self.trans_group5 = ctk.CTkCheckBox(band, text="Grup 5 huruf", font=FONT_BODY,
+                                            command=self._sync_transposition)
+        self.trans_group5.pack(side="left", padx=(0, 0))
+
+        # Row 1: text input
+        ctk.CTkLabel(parent, text="Input teks", font=FONT_BODY_BOLD).grid(
+            row=1, column=0, sticky="w", padx=4, pady=(8, 0))
+        self.trans_input = ctk.CTkTextbox(parent, height=110, font=FONT_MONO, wrap="word")
+        self.trans_input.grid(row=2, column=0, sticky="ew", padx=4, pady=4)
+        self.trans_input.insert(
+            "0.0",
+            "WEAREDISCOVEREDFLEEATONCE",
+        )
+        self.trans_input.bind("<KeyRelease>", lambda _e: self._sync_transposition())
+
+        # Row 3: field parameter dinamis (rails/keyword/width+rute)
+        self.trans_key_container = ctk.CTkFrame(parent, fg_color="transparent")
+        self.trans_key_container.grid(row=3, column=0, sticky="ew", padx=4, pady=(4, 0))
+        self.trans_store = {"algo_var": self.trans_algo_var, "on_change": self._on_trans_key_change, "widgets": {}}
+        _rebuild_key_fields(self.trans_key_container, self.trans_store)
+
+        # Row 4: output (ekspansi)
+        ctk.CTkLabel(parent, text="Hasil (live preview)", font=FONT_BODY_BOLD).grid(
+            row=4, column=0, sticky="sw", padx=4, pady=(8, 0))
+        outframe = ctk.CTkFrame(parent)
+        outframe.grid(row=5, column=0, sticky="nsew", padx=4, pady=(4, 4))
+        outframe.grid_columnconfigure(0, weight=1)
+        outframe.grid_rowconfigure(0, weight=1)
+        self.trans_output = ctk.CTkTextbox(outframe, height=130, font=FONT_MONO,
+                                           wrap="word", state="disabled")
+        self.trans_output.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+
+        btns = ctk.CTkFrame(parent, fg_color="transparent")
+        btns.grid(row=6, column=0, sticky="w", padx=4)
+        ctk.CTkButton(btns, text="Salin Hasil",
+                      command=lambda: self._copy(self._read_box(self.trans_output), "Transposisi")).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(btns, text="Salin & Catat Log", fg_color="#2B6E2F", hover_color="#1F5A22",
+                      command=self._trans_log).pack(side="left")
+
+        self._sync_transposition()
+
+    def _on_trans_key_change(self, *_args):
+        self._sync_transposition()
+
+    def _trans_algo_changed(self):
+        _rebuild_key_fields(self.trans_key_container, self.trans_store)
+        self._sync_transposition()
+
+    def _collect_trans_text_params(self):
+        """Parameter transposisi untuk operasi teks (store tab Transposisi)."""
+        return _collect_trans_params(self.trans_store)
+
+    def _trans_info(self) -> str:
+        algo = self.trans_algo_var.get()
+        params = self._collect_trans_text_params()
+        mode = self.trans_mode_var.get()
+        clean = bool(self.trans_clean.get())
+        group5 = bool(self.trans_group5.get())
+        flags = ""
+        if clean:
+            flags += " · clean"
+        if group5:
+            flags += " · grup5"
+        return f"{algo.upper()} · {mode} · {params}{flags}"
+
+    def _sync_transposition(self):
+        # Field parameter dibangun sebelum widget output; tahan aksi sampai output siap.
+        if not hasattr(self, "trans_output"):
+            return
+        raw = self.trans_input.get("0.0", "end").rstrip("\n")
+        algo = self.trans_algo_var.get()
+        mode = self.trans_mode_var.get()
+        try:
+            params = self._collect_trans_text_params()
+            result = _transpose_text(algo, mode, params, raw,
+                                     bool(self.trans_clean.get()),
+                                     bool(self.trans_group5.get()))
+            self._write_box(self.trans_output, result)
+            self._last_trans = (algo, mode, params, raw)
+        except (TypeError, ValueError) as exc:
+            self._write_box(self.trans_output, f"[Parameter tidak valid] {exc}")
+
+    def _trans_log(self):
+        algo, mode, params, raw = getattr(self, "_last_trans", ("columnar", "encrypt", {}, ""))
+        preview = raw[:40] + ("..." if len(raw) > 40 else "")
+        self._log("TRANSPOSISI", f"{algo} ({mode}) {params} \"{preview}\"")
+
+    # ----------------------- Tab 7: Advisory -----------------------
     def _build_advisory_tab(self, parent):
         parent.grid_columnconfigure(0, weight=1)
         parent.grid_rowconfigure(1, weight=1)

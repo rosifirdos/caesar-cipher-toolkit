@@ -86,3 +86,39 @@ Untuk mengamankan data sensitif pada arsitektur sistem informasi modern:
    - Gunakan Key Derivation Function standar seperti **Argon2id** atau **PBKDF2-HMAC-SHA256** untuk mengubah passphrase pengguna menjadi kunci kriptografi yang kuat dengan ketahanan terhadap serangan GPU/ASIC.
 3. **Transport Layer Security (TLS 1.3)**:
    - Gunakan protokol TLS 1.3 untuk komunikasi data in-transit, mengimplementasikan *Ephemeral Diffie-Hellman* (ECDHE) demi menjamin *Perfect Forward Secrecy (PFS)*.
+
+---
+
+## 6. Cryptography Classic: Transposition Family (Evaluasi Kriptografis)
+
+Dengan penambahan modul transposisi, toolkit kini mencakup dua **keluarga besar cipher klasik** — *substitution* (Caesar) dan *transposition*. Tinjauan keamanan berikut melengkapi evaluasi Caesar di atas.
+
+### 6.1 Prinsip Kerja
+
+Berbeda dengan substitusi (huruf **diganti**), transposisi murni hanya **mengubah urutan** huruf dengan permutasi $\pi$ pada posisi:
+$$c_i = p_{\pi(i)}$$
+
+Akibat fundamental: **distribusi frekuensi huruf tidak berubah**. Statistik huruf plaintext (mis. `A` ≈ 19% bahasa Indonesia) langsung terlihat di ciphertext — basis serangan *frequency analysis* yang sama dengan Caesar, tetapi kini bukan karena usia kunci, melainkan karena **tidak ada diffusion tunggal ke karakter** (hanya *transposition*, bukan *substitution* simultan).
+
+### 6.2 Ukuran Ruang Kunci (*Keyspace*)
+
+| Algoritma | Kunci | Ukuran Keyspace ($|K|$) | Entropi (Bits) | Catatan |
+|---|---|---|---|---|
+| **Rail Fence** | jumlah rel $r$ | $r - 1$ (≥ 2 rel non-trivial) | $\approx \log_2(r-1)$ | Ruang kunci sangat kecil; mudah dibobol |
+| **Columnar** | keyword $n$ huruf | maksimum $n!$ (susunan abjad) | $\approx \log_2(n!)$ (n=10 → 21.8 bits) | Lebih besar dari Caesar, masih rapuh |
+| **Double (columnar 2×)** | dua keyword $n_1, n_2$ | $n_1! \times n_2!$ (komposisi) | $\approx \log_2(n_1! \cdot n_2!)$ | Diffusion lebih baik, standarnya > 3 tahap (krusial dalam PNG 1944) |
+| **Myszkowski** | keyword $n$ huruf | $<\frac{n!}{m!}$ (kelompok berulang menyusut) | kurang dari Columnar untuk keyword berulang | Konvensi *shared-rank* mereduksi variasi |
+| **Route** | lebar grid $w$ × rute | $w_{max}\cdot$ (jumlah rute = 9) | bervariasi dengan $w$ | Rute terbatas; serangan *depth* (anagramming) sangat efektif |
+
+Sebagai pembanding: **AES-128** memiliki 128 bit entropi. Bahkan Columnar dengan keyword 10 huruf hanya mencapai $\approx 21.8$ bit — jauh di bawah ambang praktis keamanan modern.
+
+### 6.3 Vektor Serangan Khusus Transposisi
+
+1. **Frequency Analysis (COA)**: Karena frekuensi huruf utuh, *letter distribution* langsung mencurigakan (tidak ada puncak/trough yang "datar"-kan). *Index of Coincidence* (IC) tinggi menandakan kemungkinan besar cipher transposisi murni.
+2. **Anagramming / Depth (diployed)**: Kriptanalis mengujicoba lebar grid $w$ dan membaca kolom-kolom untuk menemukan fragmen kata yang masuk akal; teknik **Kasiski**-style pada plaintext *crib* mempercepat pemecahan.
+3. **Known-Plaintext (KPA)**: Pola posisi permutasi $\pi$ dapat di-rekonstruksi dari pasangan (plaintext, ciphertext) yang diketahui.
+4. **Ruang Kunci Small**: Rail Fence & Route dengan $w$ kecil dapat dibrute-force secara instan; keyword pendek (≤ 6 huruf) Columnar/Myszkowski juga.
+
+### 6.4 Verdict
+
+Sesuai wajah **NIST / OWASP stance** yang konsisten dengan evaluasi Caesar: seluruh cipher transposisi di atas **bersifat "breakable" dan tidak boleh digunakan** untuk melindungi data produksi (confidentiality). Nilai mereka murni **pedagogis & historis** — memahami permutasi, kombinasi transposition+substitution (dasar dari cipher modern benar-benar merupakan penggabungan keduanya), dan budaya cryptography. Untuk sistem produksi gunakan **AEAD modern (AES-256-GCM / ChaCha20-Poly1305)** sebagaimana disarankan di Bagian 5.
